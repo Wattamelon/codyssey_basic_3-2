@@ -86,11 +86,17 @@ class Repository:
 
     def get_log_commits(self) -> list[Commit]:
         """저장소의 모든 커밋을 부모가 먼저 오도록 반환한다."""
+        # INIT이 끝나지 않았다면 로그를 만들 수 없으므로 먼저 검사한다.
         self._require_initialized()
+        # 최종적으로 부모 우선 순서의 Commit 객체들을 담을 빈 목록이다.
         result: list[Commit] = []
+        # 이미 처리한 커밋 해시를 기록해 중복 출력과 재귀 반복을 막는다.
         visited: set[str] = set()
+        # 저장소에 있는 모든 커밋 해시를 하나씩 시작점으로 삼는다.
         for commit_hash in self.commits:
+            # 이 커밋과 그 부모들을 DFS로 방문해 result에 추가한다.
             self._collect_parents_first(commit_hash, visited, result)
+        # 부모가 자식보다 먼저 들어간 전체 로그 목록을 호출자에게 돌려준다.
         return result
 
     def get_ancestors(self, commit_hash: str) -> list[Commit]:
@@ -116,32 +122,49 @@ class Repository:
         self, start_hash: str, end_hash: str
     ) -> list[str] | None:
         """부모 연결을 무방향으로 보고 BFS 최단 경로를 반환한다."""
+        # 시작 해시가 실제 커밋인지 확인하고, 아니면 Unknown commit 오류를 낸다.
         self._require_commit(start_hash)
+        # 도착 해시도 실제 커밋인지 확인한다.
         self._require_commit(end_hash)
 
+        # 시작과 도착이 같으면 이동할 필요 없이 시작 커밋 하나가 경로다.
         if start_hash == end_hash:
             return [start_hash]
 
+        # queue의 한 항목은 "시작점부터 현재 위치까지의 해시 경로"다.
         queue: list[list[str]] = [[start_hash]]
+        # 같은 커밋을 여러 경로로 다시 넣지 않도록 시작점을 방문 처리한다.
         visited = {start_hash}
+        # list의 앞을 pop(0)하지 않고, 이 인덱스를 앞으로 움직여 큐처럼 쓴다.
         queue_index = 0
 
+        # 아직 처리하지 않은 경로가 큐에 남아 있는 동안 반복한다.
         while queue_index < len(queue):
+            # 현재 차례의 경로를 가져온다.
             path = queue[queue_index]
+            # 다음 반복에서 다음 경로를 읽도록 인덱스를 한 칸 이동한다.
             queue_index += 1
+            # 경로의 마지막 해시가 지금 탐색 중인 커밋이다.
             current_hash = path[-1]
 
+            # 부모와 자식을 모두 포함한, PATH 전용 양방향 이웃을 차례로 확인한다.
             for neighbor_hash in self._undirected_neighbors(current_hash):
+                # 이미 더 짧거나 같은 거리에서 방문한 커밋이면 다시 탐색하지 않는다.
                 if neighbor_hash in visited:
                     continue
 
+                # 현재 경로 끝에 이웃 하나를 붙여 새 후보 경로를 만든다.
                 next_path = path + [neighbor_hash]
+                # 이웃이 도착점이면 BFS가 처음 찾은 경로이므로 최단 경로다.
                 if neighbor_hash == end_hash:
                     return next_path
 
+                # 도착점이 아니라면, 이후 중복 방문을 막기 위해 방문 표시한다.
                 visited.add(neighbor_hash)
+                # 한 간선 더 먼 거리에서 탐색할 후보 경로를 큐 뒤에 넣는다.
                 queue.append(next_path)
 
+        # 큐를 모두 확인했는데 도착점이 없으면 연결된 경로가 없다는 뜻이다.
         return None
 
     def search_by_keyword(self, keyword: str) -> list[Commit]:
@@ -199,24 +222,36 @@ class Repository:
         result: list[Commit],
     ) -> None:
         """DFS로 부모를 먼저 방문한 뒤 현재 커밋을 결과에 넣는다."""
+        # 이미 이 커밋을 처리했으면 중복 출력하지 않고 즉시 끝낸다.
         if commit_hash in visited:
             return
 
+        # 이제부터 이 커밋을 처리한다고 기록한다.
         visited.add(commit_hash)
+        # 해시를 사용해 실제 Commit 객체를 딕셔너리에서 빠르게 찾는다.
         commit = self.commits[commit_hash]
+        # 현재 커밋의 부모 해시를 하나씩 먼저 방문한다.
         for parent_hash in commit.parents:
+            # 재귀 호출: 부모의 부모까지 모두 처리한 뒤에 돌아온다.
             self._collect_parents_first(parent_hash, visited, result)
+        # 모든 부모가 result에 들어간 뒤에야 현재 커밋을 추가한다.
         result.append(commit)
 
     def _undirected_neighbors(self, commit_hash: str) -> list[str]:
         """PATH 탐색용으로 부모와 자식을 모두 이웃으로 반환한다."""
+        # 현재 탐색 중인 커밋 객체를 해시로 찾는다.
         commit = self.commits[commit_hash]
+        # 현재 커밋이 직접 알고 있는 부모들을 우선 이웃 집합에 넣는다.
         neighbors = set(commit.parents)
 
+        # 자식 목록은 별도로 저장하지 않았으므로, 모든 커밋을 확인해 자식을 찾는다.
         for possible_child in self.commits.values():
+            # 어떤 커밋의 parents 안에 현재 해시가 있으면 그 커밋은 현재 커밋의 자식이다.
             if commit_hash in possible_child.parents:
+                # 부모에서 자식으로도 이동할 수 있도록 자식 해시를 이웃 집합에 추가한다.
                 neighbors.add(possible_child.hash)
 
+        # 동률 최단 경로에서 사전순 규칙을 지키도록 이웃 해시를 직접 정렬해 반환한다.
         return self._lexicographic_hashes(neighbors)
 
     @staticmethod
